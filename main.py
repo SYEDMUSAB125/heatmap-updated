@@ -4,6 +4,7 @@ from newtest import process_device_data, get_phosphorus_color, get_Conductivity_
 from new_f2f import process_device_data_f2f
 from dbConnection import get_db_connection
 from flask_cors import CORS
+import psycopg2
 import os
 
 # Initialize Flask app
@@ -206,9 +207,13 @@ def process_data():
 @app.route("/get_device_id", methods=['GET'])
 def get_device_id():
     try:
+        # email =request.json.get('email')  # Get email from query parameters
+        # if not email:
+        #     return jsonify({"error": "Email parameter is required"}), 400
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM users")
+        cursor.execute("SELECT * FROM users ")
+        # cursor.execute("SELECT * FROM users WHERE email = %s", (email,))
         devices = cursor.fetchall()
         cursor.close()
         conn.close()
@@ -216,5 +221,172 @@ def get_device_id():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
+@app.route("/assign_device", methods=['POST'])
+def assign_device():
+    try:
+        data = request.get_json()
+        email = data.get('email')
+        device_id = data.get('device_id')
+        
+        if not email or not device_id:
+            return jsonify({"error": "Both email and device_id parameters are required"}), 400
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Check if table exists
+        cursor.execute("""
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables 
+                WHERE table_name = 'users'
+            );
+        """)
+        table_exists = cursor.fetchone()[0]
+        
+        if not table_exists:
+            # Create the table if it doesn't exist
+            cursor.execute("""
+                CREATE TABLE users (
+                    id SERIAL PRIMARY KEY,
+                    user_email VARCHAR(255) ,
+                    device_id VARCHAR(255) ,
+                    UNIQUE(user_email, device_id)  -- Ensures no duplicate entries
+                );
+            """)
+            conn.commit()
+        
+        # Insert new device assignment
+        try:
+            cursor.execute(
+                "INSERT INTO users (user_email, device_id) VALUES (%s, %s)",
+                (email, device_id)
+            )
+            conn.commit()
+            return jsonify({
+                "message": "Device ID assigned successfully",
+                "email": email,
+                "device_id": device_id
+            }), 201
+            
+        except psycopg2.IntegrityError:  # Handle duplicate entries
+            conn.rollback()
+            return jsonify({"error": "This user-device combination already exists"}), 409
+            
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+        
+    finally:
+        cursor.close()
+        conn.close()
+
+@app.route("/search_devices", methods=['POST'])
+def search_devices():
+    try:
+        data = request.get_json()
+        email = data.get('email')
+        
+        if not email:
+            return jsonify({"error": "Email parameter is required"}), 400
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Search for devices assigned to this email
+        cursor.execute(
+            "SELECT device_id FROM users WHERE user_email = %s",
+            (email,)
+        )
+        
+        devices = cursor.fetchall()
+        cursor.close()
+        conn.close()
+        
+        # Format response (convert list of tuples to list of strings)
+        device_list = [device[0] for device in devices]
+        
+        return jsonify({
+            "devices": device_list
+        }), 200
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    
+
+@app.route("/delete_device", methods=['POST'])
+def delete_device_assignment():
+    try:
+        data = request.get_json()
+        device_id = data.get('device_id')
+        email = data.get('email')
+        
+        if not device_id or not email:
+            return jsonify({"error": "Both device ID and email parameters are required"}), 400
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # First check if the user exists with this device assignment
+        cursor.execute(
+            """SELECT user_email, device_id 
+               FROM users 
+               WHERE user_email = %s AND device_id = %s""",
+            (email, device_id)
+        )
+        assignment = cursor.fetchone()
+        
+        if not assignment:
+            cursor.close()
+            conn.close()
+            return jsonify({
+                "error": "Device assignment not found",
+                "details": f"No assignment found for email {email} and device {device_id}"
+            }), 404
+        
+        # Debug output (remove in production)
+        print(f"Found assignment: {assignment}")
+        
+        # Delete the user-device relationship
+        cursor.execute(
+            "DELETE FROM users WHERE user_email = %s AND device_id = %s",
+            (email, device_id)
+        )
+        
+        # Check if any other users have this device assigned
+        cursor.execute(
+            "SELECT COUNT(*) FROM users WHERE device_id = %s",
+            (device_id,)
+        )
+        remaining_assignments = cursor.fetchone()[0]
+        
+        # If no other users have this device, delete it from devices table
+        if remaining_assignments == 0:
+            cursor.execute(
+                "DELETE FROM devices WHERE device_id = %s",
+                (device_id,)
+            )
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        return jsonify({
+            "message": "Device assignment completely removed",
+            "deleted_assignment": {
+                "email": email,
+                "device_id": device_id
+            }
+        }), 200
+        
+    except Exception as e:
+        if 'conn' in locals():
+            conn.rollback()
+            cursor.close()
+            conn.close()
+        return jsonify({
+            "error": "Database operation failed",
+            "details": str(e)
+        }), 500
+    
 if __name__ == '__main__':
     app.run(debug=True)
