@@ -1,18 +1,13 @@
-import firebase_admin
-from firebase_admin import credentials, db, storage, firestore
-import folium
+from firebase_admin import db
 import numpy as np
 import pandas as pd
 from scipy.interpolate import griddata
 from shapely.geometry import Polygon, Point
 from scipy.spatial import ConvexHull
-import geopandas as gpd
 from concurrent.futures import ThreadPoolExecutor
-from firebase_init import get_firestore_client
 import os
 import shutil
 from dbConnection import get_db_connection
-from psycopg2 import sql
 # Function to fetch all timestamps for a given device
 def fetch_timestamps(device_id):
     path = f'/realtimedevices/{device_id}'
