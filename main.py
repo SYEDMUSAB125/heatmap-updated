@@ -311,7 +311,38 @@ def search_devices():
         
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-    
+
+@app.route("/search_user", methods=['POST'])
+def search_user():
+    try:
+        data = request.get_json()
+        device = data.get('device')
+        
+        if not device:
+            return jsonify({"error": "Email parameter is required"}), 400
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Search for devices assigned to this email
+        cursor.execute(
+            "SELECT user_email FROM users WHERE device_id = %s",
+            (device,)
+        )
+        
+        devices = cursor.fetchall()
+        cursor.close()
+        conn.close()
+        
+        # Format response (convert list of tuples to list of strings)
+        device_list = [device[0] for device in devices]
+        
+        return jsonify({
+            "devices": device_list
+        }), 200
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route("/delete_device", methods=['POST'])
 def delete_device_assignment():
@@ -358,7 +389,7 @@ def delete_device_assignment():
         # If no other users have this device, delete it from devices table
         if remaining_assignments == 0:
             cursor.execute(
-                "DELETE FROM devices WHERE device_id = %s",
+                "DELETE FROM users WHERE device_id = %s",
                 (device_id,)
             )
         
