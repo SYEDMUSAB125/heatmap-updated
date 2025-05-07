@@ -342,10 +342,6 @@ def delete_device_assignment():
                 "error": "Device assignment not found",
                 "details": f"No assignment found for email {email} and device {device_id}"
             }), 404
-        
-        # Debug output (remove in production)
-        print(f"Found assignment: {assignment}")
-        
         # Delete the user-device relationship
         cursor.execute(
             "DELETE FROM users WHERE user_email = %s AND device_id = %s",
